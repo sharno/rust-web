@@ -1,6 +1,5 @@
+use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use std::collections::HashMap;
-use warp::Filter;
 
 mod data;
 mod db;
@@ -8,37 +7,52 @@ mod handler;
 
 use crate::data::MyObject;
 
-type Db = PgPool;
+struct AppState {
+    app_name: String,
+}
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+#[get("/{id}/{name}/index.html")]
+async fn index(t: web::Path<(u32, String)>, data: web::Data<AppState>) -> impl Responder {
+    let app_name = &data.app_name; // <- get app_name
+    format!("Hello {}! id:{} from {}", t.0, t.1, app_name)
+}
+
+#[get("/")]
+async fn hello() -> impl Responder {
+    HttpResponse::Ok().body("Hello world!")
+}
+
+#[post("/echo")]
+async fn echo(req_body: String) -> impl Responder {
+    HttpResponse::Ok().body(req_body)
+}
+
+async fn manual_hello() -> impl Responder {
+    HttpResponse::Ok().body("Hey there!")
+}
+
+#[actix_web::main]
+async fn main() -> Result<(), std::io::Error> {
     dotenv::dotenv().expect(".env file not found");
     pretty_env_logger::init();
 
     log::debug!("connecting to DB");
-    log::debug!("Hellooooo");
     std::thread::sleep(std::time::Duration::from_millis(1));
-    let pool = PgPoolOptions::new()
+    let db = PgPoolOptions::new()
         .max_connections(5)
         .connect(&std::env::var("DATABASE_URL").unwrap())
-        .await?;
+        .await
+        .expect("Couldn't connect to DB");
+    log::debug!("connected to DB!");
 
-    let example1 = warp::get()
-        .and(warp::path("example1"))
-        .and(with_db(pool))
-        .and(warp::query::<HashMap<String, String>>())
-        .and_then(handler::example1);
-
-    let example2 = warp::get()
-        .and(warp::path("example2"))
-        .and(warp::query::<MyObject>())
-        .and_then(handler::example2);
-
-    Ok(warp::serve(example1.or(example2))
-        .run(([127, 0, 0, 1], 3030))
-        .await)
-}
-
-fn with_db(db: Db) -> impl Filter<Extract = (Db,), Error = std::convert::Infallible> + Clone {
-    warp::any().map(move || db.clone())
+    HttpServer::new(|| {
+        App::new()
+            .service(index)
+            .service(hello)
+            .service(echo)
+            .route("/hey", web::get().to(manual_hello))
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
 }
